@@ -70,6 +70,15 @@ These are used for:
 - **E2E testing:** Load a pre-designed game state, then assert via `godot_scene_tree`/`godot_logs`
 - **Save/load game:** Persist and restore full game state
 
+## Tick Control
+
+The `godot_tick` tool fires game ticks manually without unpausing:
+
+- **`fast`** — Number of fast ticks (0.1s each, for movement/combat)
+- **`slow`** — Number of slow ticks (1.0s each, for economy/growth/research)
+
+This enables deterministic E2E testing: load state → fire exact ticks → assert results. The game does NOT need to be unpaused — ticks fire directly via EventBus.
+
 ## Project Structure
 
 - `Scripts/McpBridge.cs` — TCP autoload that handles MCP commands (do not modify)

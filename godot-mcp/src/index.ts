@@ -414,6 +414,28 @@ server.tool(
   }
 );
 
+// ── Tick Control ──────────────────────────────────────────────────
+
+server.tool(
+  "godot_tick",
+  "Manually fire game ticks for deterministic testing. Fires fast ticks (0.1s intervals for movement/combat) and/or slow ticks (1.0s intervals for economy/growth). Game must have state loaded. Does NOT require the game to be unpaused.",
+  {
+    fast: z.number().optional().default(0).describe("Number of fast ticks to fire (0.1s each, for movement/combat)"),
+    slow: z.number().optional().default(0).describe("Number of slow ticks to fire (1.0s each, for economy/growth/research)"),
+  },
+  async ({ fast, slow }) => {
+    try {
+      const resp = await sendBridgeCommand({ cmd: "tick", fast, slow });
+      if (!resp.ok) {
+        return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      return { content: [{ type: "text", text: `Ticked: ${resp.fastFired} fast, ${resp.slowFired} slow. Game time: ${resp.gameTime}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
+    }
+  }
+);
+
 // ── State Management Tools ────────────────────────────────────────
 
 server.tool(

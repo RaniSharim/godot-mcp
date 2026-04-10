@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Godot;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+using DerlictEmpires.Autoloads;
 using DerlictEmpires.Core.Models;
 using DerlictEmpires.Core.Systems;
 using DerlictEmpires.Nodes.Map;
@@ -173,6 +174,7 @@ public partial class McpBridge : Node
                 "nodes"      => HandleNodes(root),
                 "load_state" => HandleLoadState(root),
                 "save_state" => HandleSaveState(root),
+                "tick"       => HandleTick(root),
                 _            => JsonErr($"Unknown command: {cmd}")
             };
         }
@@ -351,6 +353,52 @@ public partial class McpBridge : Node
         catch (Exception ex)
         {
             return JsonErr($"save_state error: {ex.Message}");
+        }
+    }
+
+    private string HandleTick(JsonElement root)
+    {
+        try
+        {
+            int fast = 0;
+            int slow = 0;
+            if (root.TryGetProperty("fast", out var fastEl))
+                fast = fastEl.GetInt32();
+            if (root.TryGetProperty("slow", out var slowEl))
+                slow = slowEl.GetInt32();
+
+            if (fast <= 0 && slow <= 0)
+                return JsonErr("tick requires 'fast' and/or 'slow' > 0");
+
+            var eb = EventBus.Instance;
+            var gm = GameManager.Instance;
+            if (eb == null || gm == null)
+                return JsonErr("EventBus or GameManager not initialized");
+
+            // Fire fast ticks
+            for (int i = 0; i < fast; i++)
+            {
+                gm.GameTime += TurnManager.FastTickInterval;
+                eb.FireFastTick(TurnManager.FastTickInterval);
+            }
+
+            // Fire slow ticks
+            for (int i = 0; i < slow; i++)
+            {
+                gm.GameTime += TurnManager.SlowTickInterval;
+                eb.FireSlowTick(TurnManager.SlowTickInterval);
+            }
+
+            return JsonOk(new
+            {
+                fastFired = fast,
+                slowFired = slow,
+                gameTime = gm.GameTime
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonErr($"tick error: {ex.Message}");
         }
     }
 

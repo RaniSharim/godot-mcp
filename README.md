@@ -119,6 +119,7 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 | `godot_find_nodes` | Find nodes by Godot type |
 | `godot_load_state` | Load a JSON game save file into the running instance |
 | `godot_save_state` | Save the current game state to JSON (file or inline) |
+| `godot_tick` | Fire fast/slow ticks manually for deterministic testing |
 
 ## How It Works
 
