@@ -92,7 +92,7 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 
 ## Known Limitations
 
-- **`godot_eval` disabled on Godot 4.6 Windows:** Roslyn scripting causes an access violation (native crash) when evaluating code inside Godot 4.6's .NET runtime on Windows. The eval command returns a graceful error. Use `godot_scene_tree` and `godot_logs` to inspect state instead.
+- **godot_eval is experimental on all platforms.** Roslyn scripting crashes (access violation) when the globals type is defined in Godot's in-memory assembly — a known Roslyn limitation, not a Godot 4.6-specific bug. Additionally, each eval call leaks a loaded assembly and is never freed. If eval is unstable, fall back to godot_scene_tree and godot_logs. A safer alternative is writing a temp .cs file and hot-reloading it.
 - **`CSharpScript` ambiguity on Godot 4.4+:** Godot 4.4 introduced its own `CSharpScript` class which conflicts with Roslyn's. The bridge uses fully-qualified names to resolve this.
 
 ## Platform Notes
@@ -117,6 +117,8 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 | `godot_eval` | Evaluate C# code via Roslyn (currently disabled) |
 | `godot_set_property` | Set a node property by path |
 | `godot_find_nodes` | Find nodes by Godot type |
+| `godot_load_state` | Load a JSON game save file into the running instance |
+| `godot_save_state` | Save the current game state to JSON (file or inline) |
 
 ## How It Works
 
@@ -125,10 +127,3 @@ Claude Code <--stdio--> godot-mcp (Node.js) <--TCP 9876--> McpBridge (Godot auto
 ```
 
 The MCP server spawns Godot (headless or windowed based on `GODOT_HEADLESS`), then connects to the `McpBridge` autoload over TCP. Commands are newline-delimited JSON. The bridge uses non-blocking byte-level reads in `_Process()` to avoid stalling the game loop.
-
-## Changes from Original
-
-- **Socket timeout fix:** The connection socket's 2-second timeout is now cleared after successful connection, preventing socket destruction during idle periods between commands.
-- **Non-blocking reads:** `_Process()` uses `NetworkStream.DataAvailable` + `ReadByte()` instead of blocking `StreamReader.ReadLine()`.
-- **Command serialization:** Only one command is processed per frame, with an `_processingCommand` flag to prevent re-entrant reads during async handlers (screenshot, eval).
-- **Roslyn eval disabled:** Graceful error instead of crashing on Godot 4.6 Windows.

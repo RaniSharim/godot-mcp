@@ -59,6 +59,17 @@ The project uses `McpLog.Info()`, `McpLog.Warn()`, `McpLog.Error()` instead of b
 
 The `godot_eval` tool (Roslyn C# scripting) is disabled on Godot 4.6 Windows due to a native crash. Use `godot_scene_tree` and `godot_logs` to inspect live state instead.
 
+## Save/Load State
+
+The bridge supports `load_state` and `save_state` commands for loading/saving game state as JSON:
+
+- **`godot_load_state`** — Load a JSON save file into the running instance. Accepts `path` (file path) or `json` (inline JSON). The game's root scene must implement `LoadGame(GameSaveData)`.
+- **`godot_save_state`** — Capture current game state as JSON. Accepts optional `path` to save to file; otherwise returns JSON inline. The game's root scene must implement `BuildGameSaveData()`.
+
+These are used for:
+- **E2E testing:** Load a pre-designed game state, then assert via `godot_scene_tree`/`godot_logs`
+- **Save/load game:** Persist and restore full game state
+
 ## Project Structure
 
 - `Scripts/McpBridge.cs` — TCP autoload that handles MCP commands (do not modify)

@@ -11,6 +11,9 @@ using System.Threading.Tasks;
 using Godot;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+using DerlictEmpires.Core.Models;
+using DerlictEmpires.Core.Systems;
+using DerlictEmpires.Nodes.Map;
 
 /// <summary>
 /// MCP Bridge autoload — listens on TCP 127.0.0.1:9876 and handles
@@ -168,6 +171,8 @@ public partial class McpBridge : Node
                 "eval"       => await HandleEval(root),
                 "set"        => HandleSet(root),
                 "nodes"      => HandleNodes(root),
+                "load_state" => HandleLoadState(root),
+                "save_state" => HandleSaveState(root),
                 _            => JsonErr($"Unknown command: {cmd}")
             };
         }
@@ -268,6 +273,101 @@ public partial class McpBridge : Node
         var paths = new List<string>();
         FindNodesByType(GetTree().Root, typeName, paths);
         return JsonOk(new { paths });
+    }
+
+    // ── Save/Load Handlers ─────────────────────────────────────────
+
+    private string HandleLoadState(JsonElement root)
+    {
+        try
+        {
+            string? path = null;
+            string? json = null;
+
+            if (root.TryGetProperty("path", out var pathEl))
+                path = pathEl.GetString();
+            if (root.TryGetProperty("json", out var jsonEl))
+                json = jsonEl.GetRawText();
+
+            GameSaveData saveData;
+            if (!string.IsNullOrEmpty(json))
+            {
+                saveData = SaveLoadManager.FromJson(json);
+            }
+            else if (!string.IsNullOrEmpty(path))
+            {
+                saveData = SaveLoadManager.LoadFromFile(path);
+            }
+            else
+            {
+                return JsonErr("load_state requires 'path' (file path) or 'json' (inline JSON)");
+            }
+
+            // Find the MainScene in the tree
+            var mainScene = FindMainScene();
+            if (mainScene == null)
+                return JsonErr("MainScene not found in scene tree");
+
+            mainScene.LoadGame(saveData);
+            return JsonOk(new
+            {
+                loaded = true,
+                empires = saveData.Empires.Count,
+                fleets = saveData.Fleets.Count,
+                systems = saveData.Galaxy.Systems.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonErr($"load_state error: {ex.Message}");
+        }
+    }
+
+    private string HandleSaveState(JsonElement root)
+    {
+        try
+        {
+            string? path = null;
+            if (root.TryGetProperty("path", out var pathEl))
+                path = pathEl.GetString();
+
+            var mainScene = FindMainScene();
+            if (mainScene == null)
+                return JsonErr("MainScene not found in scene tree");
+
+            var saveData = mainScene.BuildGameSaveData();
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                SaveLoadManager.SaveToFile(saveData, path);
+                return JsonOk(new { saved = true, path });
+            }
+            else
+            {
+                var json = SaveLoadManager.ToJson(saveData, compact: true);
+                return JsonOk(new { saved = true, json });
+            }
+        }
+        catch (Exception ex)
+        {
+            return JsonErr($"save_state error: {ex.Message}");
+        }
+    }
+
+    private MainScene? FindMainScene()
+    {
+        return FindNodeOfType<MainScene>(GetTree().Root);
+    }
+
+    private static T? FindNodeOfType<T>(Node node) where T : Node
+    {
+        if (node is T t) return t;
+        foreach (var child in node.GetChildren())
+        {
+            var found = FindNodeOfType<T>(child);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     // ── Helpers ───────────────────────────────────────────────────
