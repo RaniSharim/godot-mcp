@@ -1,0 +1,19 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; but it can also be edited manually if needed.
+
+config_version=5
+
+[application]
+
+config/name="GodotMcpProject"
+config/features=PackedStringArray("4.4", "C#", "GL Compatibility")
+
+[autoload]
+
+McpBridge="*res://Scripts/McpBridge.cs"
+
+[dotnet]
+
+project/assembly_name="GodotMcpProject"
+
