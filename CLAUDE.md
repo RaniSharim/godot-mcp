@@ -59,25 +59,9 @@ The project uses `McpLog.Info()`, `McpLog.Warn()`, `McpLog.Error()` instead of b
 
 The `godot_eval` tool (Roslyn C# scripting) is disabled on Godot 4.6 Windows due to a native crash. Use `godot_scene_tree` and `godot_logs` to inspect live state instead.
 
-## Save/Load State
+## Extension Tools (game-specific)
 
-The bridge supports `load_state` and `save_state` commands for loading/saving game state as JSON:
-
-- **`godot_load_state`** — Load a JSON save file into the running instance. Accepts `path` (file path) or `json` (inline JSON). The game's root scene must implement `LoadGame(GameSaveData)`.
-- **`godot_save_state`** — Capture current game state as JSON. Accepts optional `path` to save to file; otherwise returns JSON inline. The game's root scene must implement `BuildGameSaveData()`.
-
-These are used for:
-- **E2E testing:** Load a pre-designed game state, then assert via `godot_scene_tree`/`godot_logs`
-- **Save/load game:** Persist and restore full game state
-
-## Tick Control
-
-The `godot_tick` tool fires game ticks manually without unpausing:
-
-- **`fast`** — Number of fast ticks (0.1s each, for movement/combat)
-- **`slow`** — Number of slow ticks (1.0s each, for economy/growth/research)
-
-This enables deterministic E2E testing: load state → fire exact ticks → assert results. The game does NOT need to be unpaused — ticks fire directly via EventBus.
+The MCP server includes `godot_load_state`, `godot_save_state`, and `godot_tick` tools. These forward commands to the bridge but the **generic McpBridge.cs does not handle them**. To use them, extend your game's McpBridge to handle `load_state`, `save_state`, and `tick` commands. See the README for details.
 
 ## Project Structure
 

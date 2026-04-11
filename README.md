@@ -105,6 +105,8 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 
 ## Available MCP Tools
 
+### Core Tools (handled by the included McpBridge.cs)
+
 | Tool | Description |
 |---|---|
 | `godot_start` | Start Godot with a scene |
@@ -117,6 +119,13 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 | `godot_eval` | Evaluate C# code via Roslyn (currently disabled) |
 | `godot_set_property` | Set a node property by path |
 | `godot_find_nodes` | Find nodes by Godot type |
+
+### Extension Tools (require game-specific bridge commands)
+
+These tools forward commands to the bridge. They work if your game's McpBridge handles `load_state`, `save_state`, and `tick` commands. The generic `McpBridge.cs` included here does **not** handle them — you must extend it.
+
+| Tool | Description |
+|---|---|
 | `godot_load_state` | Load a JSON game save file into the running instance |
 | `godot_save_state` | Save the current game state to JSON (file or inline) |
 | `godot_tick` | Fire fast/slow ticks manually for deterministic testing |
