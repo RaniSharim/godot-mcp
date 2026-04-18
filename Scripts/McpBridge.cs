@@ -364,6 +364,12 @@ public partial class McpBridge : Node
 
             var pos = new Vector2(x, y);
 
+            // Warp the real OS cursor to the target so polling code (e.g. camera edge-pan
+            // reading GetMousePosition()) sees the intended position rather than the user's
+            // physical cursor. Without this, edge-pan drifts the camera between clicks and
+            // pre-computed coordinates miss their targets.
+            Input.WarpMouse(pos);
+
             var press = new InputEventMouseButton
             {
                 Position = pos,
