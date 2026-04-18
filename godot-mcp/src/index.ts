@@ -416,21 +416,27 @@ server.tool(
 
 server.tool(
   "godot_click",
-  "Simulate a mouse click at viewport coordinates (x,y in pixels). Fires a press+release pair with one frame between them, dispatched via Input.ParseInputEvent so UI controls (Buttons, Controls) receive it normally. Works in headless and windowed mode.",
+  "Simulate a mouse click at viewport coordinates (x,y in pixels). Fires a press+release pair with one frame between them, dispatched via Input.ParseInputEvent so UI controls (Buttons, Controls) receive it normally. Works in headless and windowed mode. Modifiers (ctrl/shift/alt/meta) are set on both press and release events — use ctrl=true for multi-select UIs.",
   {
     x: z.number().describe("X coordinate in the viewport (pixels from top-left)"),
     y: z.number().describe("Y coordinate in the viewport (pixels from top-left)"),
     button: z.enum(["left", "right", "middle"]).optional().default("left").describe("Mouse button to click"),
     double: z.boolean().optional().default(false).describe("Mark the press event as a double-click"),
+    ctrl: z.boolean().optional().default(false).describe("Hold Ctrl while clicking"),
+    shift: z.boolean().optional().default(false).describe("Hold Shift while clicking"),
+    alt: z.boolean().optional().default(false).describe("Hold Alt while clicking"),
+    meta: z.boolean().optional().default(false).describe("Hold Meta/Super/Cmd while clicking"),
   },
-  async ({ x, y, button, double: doubleClick }) => {
+  async ({ x, y, button, double: doubleClick, ctrl, shift, alt, meta }) => {
     try {
-      const resp = await sendBridgeCommand({ cmd: "click", x, y, button, double: doubleClick });
+      const resp = await sendBridgeCommand({ cmd: "click", x, y, button, double: doubleClick, ctrl, shift, alt, meta });
       if (!resp.ok) {
         return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
       }
+      const mods = [ctrl && "ctrl", shift && "shift", alt && "alt", meta && "meta"].filter(Boolean).join("+");
       const label = doubleClick ? `double-${button}` : button;
-      return { content: [{ type: "text", text: `Clicked ${label} at (${x}, ${y})` }] };
+      const prefix = mods ? `${mods}+` : "";
+      return { content: [{ type: "text", text: `Clicked ${prefix}${label} at (${x}, ${y})` }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
     }
@@ -490,20 +496,26 @@ server.tool(
 
 server.tool(
   "godot_click_node",
-  "Fire a click directly at a specific node, bypassing the hit-test. For Area3D/Area2D this emits the input_event signal; for Control nodes it emits gui_input. Supports left/right/middle buttons and double-click. Use when coordinate-based godot_click is flaky due to camera position, occlusion, or tiny collision shapes.",
+  "Fire a click directly at a specific node, bypassing the hit-test. For Area3D/Area2D this emits the input_event signal; for Control nodes it emits gui_input. Supports left/right/middle buttons, double-click, and modifier keys (ctrl/shift/alt/meta). Use when coordinate-based godot_click is flaky due to camera position, occlusion, or tiny collision shapes.",
   {
     node_path: z.string().describe("Absolute path to an Area3D, Area2D, or Control node"),
     button: z.enum(["left", "right", "middle"]).optional().default("left").describe("Mouse button to simulate"),
     double: z.boolean().optional().default(false).describe("Mark the press event's DoubleClick flag"),
+    ctrl: z.boolean().optional().default(false).describe("Hold Ctrl while clicking"),
+    shift: z.boolean().optional().default(false).describe("Hold Shift while clicking"),
+    alt: z.boolean().optional().default(false).describe("Hold Alt while clicking"),
+    meta: z.boolean().optional().default(false).describe("Hold Meta/Super/Cmd while clicking"),
   },
-  async ({ node_path, button, double: doubleClick }) => {
+  async ({ node_path, button, double: doubleClick, ctrl, shift, alt, meta }) => {
     try {
-      const resp = await sendBridgeCommand({ cmd: "click_node", node_path, button, double: doubleClick });
+      const resp = await sendBridgeCommand({ cmd: "click_node", node_path, button, double: doubleClick, ctrl, shift, alt, meta });
       if (!resp.ok) {
         return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
       }
+      const mods = [ctrl && "ctrl", shift && "shift", alt && "alt", meta && "meta"].filter(Boolean).join("+");
       const label = doubleClick ? `double-${button}` : button;
-      return { content: [{ type: "text", text: `Clicked ${label} on ${node_path} (${resp.kind})` }] };
+      const prefix = mods ? `${mods}+` : "";
+      return { content: [{ type: "text", text: `Clicked ${prefix}${label} on ${node_path} (${resp.kind})` }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
     }

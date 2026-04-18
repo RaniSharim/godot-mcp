@@ -344,6 +344,10 @@ public partial class McpBridge : Node
         string nodePath = root.GetProperty("node_path").GetString() ?? "";
         string buttonStr = root.TryGetProperty("button", out var b) ? b.GetString() : "left";
         bool doubleClick = root.TryGetProperty("double", out var d) && d.GetBoolean();
+        bool ctrl = root.TryGetProperty("ctrl", out var cc) && cc.GetBoolean();
+        bool shift = root.TryGetProperty("shift", out var ss) && ss.GetBoolean();
+        bool alt = root.TryGetProperty("alt", out var aa) && aa.GetBoolean();
+        bool meta = root.TryGetProperty("meta", out var mm) && mm.GetBoolean();
         var node = GetTree().Root.GetNodeOrNull(nodePath);
         if (node == null)
             return JsonErr($"Node not found: {nodePath}");
@@ -367,11 +371,19 @@ public partial class McpBridge : Node
             Pressed = true,
             ButtonMask = mask,
             DoubleClick = doubleClick,
+            CtrlPressed = ctrl,
+            ShiftPressed = shift,
+            AltPressed = alt,
+            MetaPressed = meta,
         };
         var release = new InputEventMouseButton
         {
             ButtonIndex = button,
             Pressed = false,
+            CtrlPressed = ctrl,
+            ShiftPressed = shift,
+            AltPressed = alt,
+            MetaPressed = meta,
         };
 
         if (node is Area3D area3d)
@@ -391,11 +403,11 @@ public partial class McpBridge : Node
             area2d.EmitSignal(Area2D.SignalName.InputEvent, GetViewport(), release, 0);
             return JsonOk(new { path = nodePath, kind = "area2d", button = buttonStr, doubleClick });
         }
-        if (node is Control ctrl)
+        if (node is Control ctrlNode)
         {
-            press.Position = ctrl.GlobalPosition + ctrl.Size * 0.5f;
-            ctrl.EmitSignal(Control.SignalName.GuiInput, press);
-            ctrl.EmitSignal(Control.SignalName.GuiInput, release);
+            press.Position = ctrlNode.GlobalPosition + ctrlNode.Size * 0.5f;
+            ctrlNode.EmitSignal(Control.SignalName.GuiInput, press);
+            ctrlNode.EmitSignal(Control.SignalName.GuiInput, release);
             return JsonOk(new { path = nodePath, kind = "control", button = buttonStr, doubleClick });
         }
         return JsonErr($"Node {nodePath} is {node.GetType().Name}; expected Area3D, Area2D, or Control");
@@ -452,6 +464,10 @@ public partial class McpBridge : Node
             float y = (float)root.GetProperty("y").GetDouble();
             string buttonStr = root.TryGetProperty("button", out var b) ? b.GetString() : "left";
             bool doubleClick = root.TryGetProperty("double", out var d) && d.GetBoolean();
+            bool ctrl = root.TryGetProperty("ctrl", out var cc) && cc.GetBoolean();
+            bool shift = root.TryGetProperty("shift", out var ss) && ss.GetBoolean();
+            bool alt = root.TryGetProperty("alt", out var aa) && aa.GetBoolean();
+            bool meta = root.TryGetProperty("meta", out var mm) && mm.GetBoolean();
 
             MouseButton button = buttonStr switch
             {
@@ -486,6 +502,10 @@ public partial class McpBridge : Node
                 ButtonMask = mask,
                 Pressed = true,
                 DoubleClick = doubleClick,
+                CtrlPressed = ctrl,
+                ShiftPressed = shift,
+                AltPressed = alt,
+                MetaPressed = meta,
             };
             Input.ParseInputEvent(press);
 
@@ -498,6 +518,10 @@ public partial class McpBridge : Node
                 ButtonIndex = button,
                 ButtonMask = 0,
                 Pressed = false,
+                CtrlPressed = ctrl,
+                ShiftPressed = shift,
+                AltPressed = alt,
+                MetaPressed = meta,
             };
             Input.ParseInputEvent(release);
 
