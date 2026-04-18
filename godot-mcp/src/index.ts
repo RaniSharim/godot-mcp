@@ -414,6 +414,55 @@ server.tool(
   }
 );
 
+server.tool(
+  "godot_click",
+  "Simulate a mouse click at viewport coordinates (x,y in pixels). Fires a press+release pair with one frame between them, dispatched via Input.ParseInputEvent so UI controls (Buttons, Controls) receive it normally. Works in headless and windowed mode.",
+  {
+    x: z.number().describe("X coordinate in the viewport (pixels from top-left)"),
+    y: z.number().describe("Y coordinate in the viewport (pixels from top-left)"),
+    button: z.enum(["left", "right", "middle"]).optional().default("left").describe("Mouse button to click"),
+    double: z.boolean().optional().default(false).describe("Mark the press event as a double-click"),
+  },
+  async ({ x, y, button, double: doubleClick }) => {
+    try {
+      const resp = await sendBridgeCommand({ cmd: "click", x, y, button, double: doubleClick });
+      if (!resp.ok) {
+        return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      const label = doubleClick ? `double-${button}` : button;
+      return { content: [{ type: "text", text: `Clicked ${label} at (${x}, ${y})` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "godot_key",
+  "Simulate a keyboard key event via Input.ParseInputEvent. mode='tap' fires press+release with one frame between; 'press' or 'release' fire only that edge (for holding/releasing keys across calls). Modifiers (shift/ctrl/alt/meta) are set on the event. Unicode is auto-filled for A-Z, 0-9, space, and common punctuation so LineEdit-style inputs receive typed characters.",
+  {
+    key: z.string().describe("Godot Key enum name: letters 'A'-'Z', digits 'Key0'-'Key9', 'Enter', 'Space', 'Escape', 'Backspace', 'Tab', 'Left'/'Right'/'Up'/'Down', 'F1'-'F12', etc. Case-insensitive."),
+    mode: z.enum(["tap", "press", "release"]).optional().default("tap").describe("'tap' = press+release, 'press' = press only, 'release' = release only"),
+    shift: z.boolean().optional().default(false),
+    ctrl: z.boolean().optional().default(false),
+    alt: z.boolean().optional().default(false),
+    meta: z.boolean().optional().default(false),
+  },
+  async ({ key, mode, shift, ctrl, alt, meta }) => {
+    try {
+      const resp = await sendBridgeCommand({ cmd: "key", key, mode, shift, ctrl, alt, meta });
+      if (!resp.ok) {
+        return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      const mods = [shift && "shift", ctrl && "ctrl", alt && "alt", meta && "meta"].filter(Boolean).join("+");
+      const label = mods ? `${mods}+${key}` : key;
+      return { content: [{ type: "text", text: `Key ${mode}: ${label}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
+    }
+  }
+);
+
 // ── Tick Control ──────────────────────────────────────────────────
 
 server.tool(

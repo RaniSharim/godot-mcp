@@ -168,6 +168,8 @@ public partial class McpBridge : Node
                 "eval"       => await HandleEval(root),
                 "set"        => HandleSet(root),
                 "nodes"      => HandleNodes(root),
+                "click"      => await HandleClick(root),
+                "key"        => await HandleKey(root),
                 _            => JsonErr($"Unknown command: {cmd}")
             };
         }
@@ -268,6 +270,131 @@ public partial class McpBridge : Node
         var paths = new List<string>();
         FindNodesByType(GetTree().Root, typeName, paths);
         return JsonOk(new { paths });
+    }
+
+    private async Task<string> HandleKey(JsonElement root)
+    {
+        try
+        {
+            string keyName = root.GetProperty("key").GetString();
+            string mode = root.TryGetProperty("mode", out var m) ? m.GetString() : "tap";
+            bool shift = root.TryGetProperty("shift", out var s) && s.GetBoolean();
+            bool ctrl = root.TryGetProperty("ctrl", out var c) && c.GetBoolean();
+            bool alt = root.TryGetProperty("alt", out var a) && a.GetBoolean();
+            bool meta = root.TryGetProperty("meta", out var me) && me.GetBoolean();
+
+            if (mode != "tap" && mode != "press" && mode != "release")
+                return JsonErr($"Unknown mode: {mode} (use tap/press/release)");
+
+            if (!Enum.TryParse<Key>(keyName, true, out var keycode))
+                return JsonErr($"Unknown key: {keyName}. Use Godot Key enum names (A, Enter, Space, Key1, F1, Left, ...).");
+
+            long unicode = ComputeUnicode(keycode, shift);
+
+            InputEventKey MakeEvent(bool pressed) => new InputEventKey
+            {
+                Keycode = keycode,
+                PhysicalKeycode = keycode,
+                Unicode = unicode,
+                Pressed = pressed,
+                ShiftPressed = shift,
+                CtrlPressed = ctrl,
+                AltPressed = alt,
+                MetaPressed = meta,
+            };
+
+            if (mode == "press" || mode == "tap")
+            {
+                Input.ParseInputEvent(MakeEvent(true));
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            }
+            if (mode == "release" || mode == "tap")
+            {
+                Input.ParseInputEvent(MakeEvent(false));
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            }
+
+            return JsonOk(new { key = keyName, mode });
+        }
+        catch (Exception ex)
+        {
+            return JsonErr($"Key error: {ex.Message}");
+        }
+    }
+
+    private static long ComputeUnicode(Key keycode, bool shift)
+    {
+        uint kc = (uint)keycode;
+        if (kc >= (uint)Key.A && kc <= (uint)Key.Z)
+            return shift ? kc : kc + 32;
+        if (kc >= (uint)Key.Key0 && kc <= (uint)Key.Key9 && !shift)
+            return kc;
+        if (keycode == Key.Space)  return 0x20;
+        if (keycode == Key.Minus)  return shift ? '_' : '-';
+        if (keycode == Key.Equal)  return shift ? '+' : '=';
+        if (keycode == Key.Period) return shift ? '>' : '.';
+        if (keycode == Key.Comma)  return shift ? '<' : ',';
+        if (keycode == Key.Slash)  return shift ? '?' : '/';
+        return 0;
+    }
+
+    private async Task<string> HandleClick(JsonElement root)
+    {
+        try
+        {
+            float x = (float)root.GetProperty("x").GetDouble();
+            float y = (float)root.GetProperty("y").GetDouble();
+            string buttonStr = root.TryGetProperty("button", out var b) ? b.GetString() : "left";
+            bool doubleClick = root.TryGetProperty("double", out var d) && d.GetBoolean();
+
+            MouseButton button = buttonStr switch
+            {
+                "left"   => MouseButton.Left,
+                "right"  => MouseButton.Right,
+                "middle" => MouseButton.Middle,
+                _        => MouseButton.Left
+            };
+            MouseButtonMask mask = buttonStr switch
+            {
+                "left"   => MouseButtonMask.Left,
+                "right"  => MouseButtonMask.Right,
+                "middle" => MouseButtonMask.Middle,
+                _        => MouseButtonMask.Left
+            };
+
+            var pos = new Vector2(x, y);
+
+            var press = new InputEventMouseButton
+            {
+                Position = pos,
+                GlobalPosition = pos,
+                ButtonIndex = button,
+                ButtonMask = mask,
+                Pressed = true,
+                DoubleClick = doubleClick,
+            };
+            Input.ParseInputEvent(press);
+
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            var release = new InputEventMouseButton
+            {
+                Position = pos,
+                GlobalPosition = pos,
+                ButtonIndex = button,
+                ButtonMask = 0,
+                Pressed = false,
+            };
+            Input.ParseInputEvent(release);
+
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            return JsonOk(new { x, y, button = buttonStr, doubleClick });
+        }
+        catch (Exception ex)
+        {
+            return JsonErr($"Click error: {ex.Message}");
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────

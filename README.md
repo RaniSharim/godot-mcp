@@ -119,6 +119,59 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 | `godot_eval` | Evaluate C# code via Roslyn (currently disabled) |
 | `godot_set_property` | Set a node property by path |
 | `godot_find_nodes` | Find nodes by Godot type |
+| `godot_click` | Simulate a mouse click at viewport (x, y) |
+| `godot_key` | Simulate a keyboard key event |
+
+#### `godot_click`
+
+Injects a paired `InputEventMouseButton` press+release via `Input.ParseInputEvent`, with one frame between them so UI controls (Button, Control, etc.) see it as a real click. Works in both headless and windowed mode.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `x` | number | required | Viewport X coordinate in pixels (from top-left) |
+| `y` | number | required | Viewport Y coordinate in pixels (from top-left) |
+| `button` | `"left" \| "right" \| "middle"` | `"left"` | Mouse button |
+| `double` | boolean | `false` | Sets the press event's `DoubleClick` flag |
+
+Example — right-click at (400, 300):
+
+```json
+{ "x": 400, "y": 300, "button": "right" }
+```
+
+Example — double-click a button:
+
+```json
+{ "x": 120, "y": 80, "double": true }
+```
+
+**Finding coordinates:** use `godot_scene_tree` to read a Control's `position` + `size`, or take a `godot_screenshot` in windowed mode and click a pixel.
+
+#### `godot_key`
+
+Injects an `InputEventKey` via `Input.ParseInputEvent`. Use `mode: "tap"` for most cases; `"press"` and `"release"` let you hold a key across multiple calls (e.g., hold W for N frames of movement, then release). The `Unicode` field is auto-filled for A–Z, 0–9, space, and common punctuation so `LineEdit` actually receives typed characters.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `key` | string | required | Godot `Key` enum name (case-insensitive). Letters `"A"`–`"Z"`, digits `"Key0"`–`"Key9"`, `"Enter"`, `"Space"`, `"Escape"`, `"Backspace"`, `"Tab"`, `"Left"`/`"Right"`/`"Up"`/`"Down"`, `"F1"`–`"F12"`, etc. |
+| `mode` | `"tap" \| "press" \| "release"` | `"tap"` | `tap` = press+release with one frame between; `press` / `release` fire a single edge |
+| `shift` | boolean | `false` | Modifier |
+| `ctrl` | boolean | `false` | Modifier |
+| `alt` | boolean | `false` | Modifier |
+| `meta` | boolean | `false` | Modifier (Windows/Command key) |
+
+Examples:
+
+```json
+{ "key": "Enter" }                       // tap Enter
+{ "key": "A", "shift": true }            // tap Shift+A (Unicode 'A')
+{ "key": "S", "ctrl": true }             // Ctrl+S
+{ "key": "W", "mode": "press" }          // hold W
+{ "key": "W", "mode": "release" }        // release W later
+{ "key": "Escape" }                      // tap Escape
+```
+
+To type a string into a `LineEdit`, first click it to give it focus, then tap each character in sequence.
 
 ### Extension Tools (require game-specific bridge commands)
 
