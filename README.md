@@ -121,6 +121,9 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 | `godot_find_nodes` | Find nodes by Godot type |
 | `godot_click` | Simulate a mouse click at viewport (x, y) |
 | `godot_key` | Simulate a keyboard key event |
+| `godot_press_button` | Press a UI button directly by path (bypasses hit-test) |
+| `godot_click_node` | Fire a click directly on an Area3D/Area2D/Control by path |
+| `godot_fire_signal` | Emit an arbitrary signal on any node |
 
 #### `godot_click`
 
@@ -172,6 +175,68 @@ Examples:
 ```
 
 To type a string into a `LineEdit`, first click it to give it focus, then tap each character in sequence.
+
+#### Direct-Invoke Tools (bypass hit-testing)
+
+Coordinate-based `godot_click` exercises the full input pipeline — camera projection, hit-test, click priority, MouseFilter propagation. That's essential for integration testing but painful for gameplay-logic work when the cursor position, camera drift, or overlapping nodes make clicks flaky.
+
+The three direct-invoke tools below target a node by path and fire its handler directly. They're the Godot equivalent of "call the function in a unit test" as opposed to "click the button in a Selenium test."
+
+**Trade-off:** they bypass bugs in the input pipeline itself. If `godot_click` works but `godot_press_button` doesn't, the handler has a bug. If `godot_press_button` works but `godot_click` doesn't, the hit-test has a bug.
+
+##### `godot_press_button`
+
+Emits `BaseButton.Pressed` directly. The fastest way to test any `Button`, `CheckBox`, `LinkButton`, etc.
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `node_path` | string | required | Absolute path to a `BaseButton` subclass |
+
+Response includes the button's `Disabled` state at the time of the call, so you can assert whether a disabled button's handler still fired.
+
+```json
+{ "node_path": "/root/Main/UILayer/RightPanel/ActionRow/ScanButton" }
+```
+
+##### `godot_click_node`
+
+Fires a `press + release` pair of `InputEventMouseButton` directly on a node, bypassing the hit-test. Routing depends on node type:
+
+- **`Area3D`**: emits `input_event(camera, event, pos, normal, shape_idx)` with the node's `GlobalPosition` and the viewport's active Camera3D
+- **`Area2D`**: emits `input_event(viewport, event, shape_idx)` with the node's `GlobalPosition`
+- **`Control`**: emits `gui_input(event)` with a position at the Control's center
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `node_path` | string | required | Absolute path to an `Area3D`, `Area2D`, or `Control` node |
+| `button` | `"left" \| "right" \| "middle"` | `"left"` | Mouse button to simulate |
+| `double` | boolean | `false` | Sets the press event's `DoubleClick` flag |
+
+Examples:
+
+```json
+{ "node_path": "/root/Main/GalaxyMap/StarSystems/System_7", "button": "right" }
+{ "node_path": "/root/Main/UILayer/FleetCard_0", "double": true }
+```
+
+Use when the click target is tiny, offscreen, occluded, or positioned by a drifting camera — i.e., whenever `godot_click` at coordinates is fragile.
+
+##### `godot_fire_signal`
+
+Generic escape hatch. Emits any signal with any args. Use when `press_button` / `click_node` don't apply (custom signals, Toggle signals with args, etc.).
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `node_path` | string | required | Path to the node emitting |
+| `signal` | string | required | Signal name (Godot convention is snake_case: `"pressed"`, `"toggled"`, `"value_changed"`) |
+| `args` | JSON array | `[]` | Each element is converted to a Variant in the order declared by the signal |
+
+Examples:
+
+```json
+{ "node_path": "/root/Main/Settings/MusicSlider", "signal": "value_changed", "args": [0.75] }
+{ "node_path": "/root/Main/UI/MuteToggle", "signal": "toggled", "args": [true] }
+```
 
 ### Extension Tools (require game-specific bridge commands)
 

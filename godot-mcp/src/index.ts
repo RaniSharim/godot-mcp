@@ -463,6 +463,74 @@ server.tool(
   }
 );
 
+// ── Direct-Invoke Tools (bypass hit-testing) ─────────────────────
+// These target a specific node by path and fire its handler directly, bypassing
+// camera projection, occlusion, and mouse-filter propagation. Use them for
+// gameplay-logic testing where you don't need to exercise the input pipeline.
+
+server.tool(
+  "godot_press_button",
+  "Press a UI button directly by emitting its Pressed signal. Bypasses the mouse input pipeline entirely — the button's Pressed handler fires even if the button is disabled, offscreen, or occluded. Returns the button's disabled state in the response.",
+  {
+    node_path: z.string().describe("Absolute path to a BaseButton (Button, CheckBox, etc.), e.g. '/root/Main/UILayer/RightPanel/ScanButton'"),
+  },
+  async ({ node_path }) => {
+    try {
+      const resp = await sendBridgeCommand({ cmd: "press_button", node_path });
+      if (!resp.ok) {
+        return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      const suffix = resp.disabled ? " (was disabled)" : "";
+      return { content: [{ type: "text", text: `Pressed ${node_path}${suffix}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "godot_click_node",
+  "Fire a click directly at a specific node, bypassing the hit-test. For Area3D/Area2D this emits the input_event signal; for Control nodes it emits gui_input. Supports left/right/middle buttons and double-click. Use when coordinate-based godot_click is flaky due to camera position, occlusion, or tiny collision shapes.",
+  {
+    node_path: z.string().describe("Absolute path to an Area3D, Area2D, or Control node"),
+    button: z.enum(["left", "right", "middle"]).optional().default("left").describe("Mouse button to simulate"),
+    double: z.boolean().optional().default(false).describe("Mark the press event's DoubleClick flag"),
+  },
+  async ({ node_path, button, double: doubleClick }) => {
+    try {
+      const resp = await sendBridgeCommand({ cmd: "click_node", node_path, button, double: doubleClick });
+      if (!resp.ok) {
+        return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      const label = doubleClick ? `double-${button}` : button;
+      return { content: [{ type: "text", text: `Clicked ${label} on ${node_path} (${resp.kind})` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "godot_fire_signal",
+  "Emit an arbitrary signal on any node. Generic escape hatch for direct invocation when press_button / click_node don't apply (custom signals, non-Button UI, etc.). Args are JSON values converted to Variants.",
+  {
+    node_path: z.string().describe("Absolute path to the node emitting the signal"),
+    signal: z.string().describe("Signal name, e.g. 'pressed', 'toggled', 'my_custom_signal'"),
+    args: z.array(z.any()).optional().default([]).describe("Signal arguments as a JSON array; each element becomes a Variant"),
+  },
+  async ({ node_path, signal, args }) => {
+    try {
+      const resp = await sendBridgeCommand({ cmd: "fire_signal", node_path, signal, args });
+      if (!resp.ok) {
+        return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      return { content: [{ type: "text", text: `Emitted ${signal}(${resp.argc} args) on ${node_path}` }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
+    }
+  }
+);
+
 // ── Tick Control ──────────────────────────────────────────────────
 
 server.tool(

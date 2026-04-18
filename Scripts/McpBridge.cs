@@ -170,6 +170,9 @@ public partial class McpBridge : Node
                 "nodes"      => HandleNodes(root),
                 "click"      => await HandleClick(root),
                 "key"        => await HandleKey(root),
+                "press_button" => HandlePressButton(root),
+                "click_node" => HandleClickNode(root),
+                "fire_signal" => HandleFireSignal(root),
                 _            => JsonErr($"Unknown command: {cmd}")
             };
         }
@@ -322,6 +325,109 @@ public partial class McpBridge : Node
         }
     }
 
+    private string HandlePressButton(JsonElement root)
+    {
+        string nodePath = root.GetProperty("node_path").GetString() ?? "";
+        var node = GetTree().Root.GetNodeOrNull(nodePath);
+        if (node == null)
+            return JsonErr($"Node not found: {nodePath}");
+        if (node is not BaseButton btn)
+            return JsonErr($"Node {nodePath} is {node.GetType().Name}, not a BaseButton");
+
+        bool wasDisabled = btn.Disabled;
+        btn.EmitSignal(BaseButton.SignalName.Pressed);
+        return JsonOk(new { path = nodePath, disabled = wasDisabled });
+    }
+
+    private string HandleClickNode(JsonElement root)
+    {
+        string nodePath = root.GetProperty("node_path").GetString() ?? "";
+        string buttonStr = root.TryGetProperty("button", out var b) ? b.GetString() : "left";
+        bool doubleClick = root.TryGetProperty("double", out var d) && d.GetBoolean();
+        var node = GetTree().Root.GetNodeOrNull(nodePath);
+        if (node == null)
+            return JsonErr($"Node not found: {nodePath}");
+
+        MouseButton button = buttonStr switch
+        {
+            "right"  => MouseButton.Right,
+            "middle" => MouseButton.Middle,
+            _        => MouseButton.Left
+        };
+        MouseButtonMask mask = button switch
+        {
+            MouseButton.Right  => MouseButtonMask.Right,
+            MouseButton.Middle => MouseButtonMask.Middle,
+            _                  => MouseButtonMask.Left,
+        };
+
+        var press = new InputEventMouseButton
+        {
+            ButtonIndex = button,
+            Pressed = true,
+            ButtonMask = mask,
+            DoubleClick = doubleClick,
+        };
+        var release = new InputEventMouseButton
+        {
+            ButtonIndex = button,
+            Pressed = false,
+        };
+
+        if (node is Area3D area3d)
+        {
+            var cam = GetViewport().GetCamera3D();
+            var pos = area3d.GlobalPosition;
+            press.Position = new Vector2(pos.X, pos.Z);
+            area3d.EmitSignal(Area3D.SignalName.InputEvent, cam, press, pos, Vector3.Up, 0);
+            area3d.EmitSignal(Area3D.SignalName.InputEvent, cam, release, pos, Vector3.Up, 0);
+            return JsonOk(new { path = nodePath, kind = "area3d", button = buttonStr, doubleClick });
+        }
+        if (node is Area2D area2d)
+        {
+            var pos = area2d.GlobalPosition;
+            press.Position = pos;
+            area2d.EmitSignal(Area2D.SignalName.InputEvent, GetViewport(), press, 0);
+            area2d.EmitSignal(Area2D.SignalName.InputEvent, GetViewport(), release, 0);
+            return JsonOk(new { path = nodePath, kind = "area2d", button = buttonStr, doubleClick });
+        }
+        if (node is Control ctrl)
+        {
+            press.Position = ctrl.GlobalPosition + ctrl.Size * 0.5f;
+            ctrl.EmitSignal(Control.SignalName.GuiInput, press);
+            ctrl.EmitSignal(Control.SignalName.GuiInput, release);
+            return JsonOk(new { path = nodePath, kind = "control", button = buttonStr, doubleClick });
+        }
+        return JsonErr($"Node {nodePath} is {node.GetType().Name}; expected Area3D, Area2D, or Control");
+    }
+
+    private string HandleFireSignal(JsonElement root)
+    {
+        string nodePath = root.GetProperty("node_path").GetString() ?? "";
+        string signalName = root.GetProperty("signal").GetString() ?? "";
+        var node = GetTree().Root.GetNodeOrNull(nodePath);
+        if (node == null)
+            return JsonErr($"Node not found: {nodePath}");
+
+        Variant[] args;
+        if (root.TryGetProperty("args", out var argsElement) && argsElement.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<Variant>();
+            foreach (var el in argsElement.EnumerateArray())
+                list.Add(JsonElementToVariant(el));
+            args = list.ToArray();
+        }
+        else
+        {
+            args = Array.Empty<Variant>();
+        }
+
+        var err = node.EmitSignal(signalName, args);
+        if (err != Error.Ok)
+            return JsonErr($"EmitSignal returned {err}");
+        return JsonOk(new { path = nodePath, signal = signalName, argc = args.Length });
+    }
+
     private static long ComputeUnicode(Key keycode, bool shift)
     {
         uint kc = (uint)keycode;
@@ -370,6 +476,8 @@ public partial class McpBridge : Node
             // pre-computed coordinates miss their targets.
             Input.WarpMouse(pos);
 
+            bool parkCursor = !root.TryGetProperty("park", out var pk) || pk.GetBoolean();
+
             var press = new InputEventMouseButton
             {
                 Position = pos,
@@ -394,6 +502,18 @@ public partial class McpBridge : Node
             Input.ParseInputEvent(release);
 
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            // Park the cursor at viewport center so polling-based edge-pan logic doesn't
+            // drift the camera between MCP commands. Pass "park": false to skip.
+            if (parkCursor)
+            {
+                try
+                {
+                    var size = GetViewport().GetVisibleRect().Size;
+                    Input.WarpMouse(new Vector2(size.X / 2f, size.Y / 2f));
+                }
+                catch { /* best effort */ }
+            }
 
             return JsonOk(new { x, y, button = buttonStr, doubleClick });
         }
