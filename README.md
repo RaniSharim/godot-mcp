@@ -23,9 +23,12 @@ Add to your `.csproj`:
 
 ```xml
 <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.12.0" />
+<PackageReference Include="Devlooped.JQ" Version="1.8.1.1" />
 ```
 
 **Note:** On Godot 4.4+, `CSharpScript` is ambiguous between Godot and Roslyn. The bridge uses fully-qualified `Microsoft.CodeAnalysis.CSharp.Scripting.CSharpScript` to avoid this.
+
+`Devlooped.JQ` powers the `jq` filter on `godot_scene_tree`. It bundles the real `jq` binary and shells out via `Process`, so there's no native-load risk in coreclr and no user install step.
 
 ### 3. Register the autoload
 
@@ -112,10 +115,10 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 | `godot_start` | Start Godot with a scene |
 | `godot_stop` | Stop the Godot process |
 | `godot_reload` | Restart Godot (triggers C# recompilation) |
-| `godot_screenshot` | Capture viewport as PNG (windowed mode only) |
-| `godot_scene_tree` | Get full scene tree with properties |
+| `godot_screenshot` | Capture viewport as PNG (windowed mode only). Supports `wait_frames` to let tweens settle. |
+| `godot_scene_tree` | Scene tree with node types, paths, and optional properties. Supports `from_path`, `include_properties`, and server-side `jq` filtering. |
 | `godot_logs` | Drain McpLog buffer |
-| `godot_stdout` | Get Godot process stdout/stderr (compiler errors) |
+| `godot_stdout` | Get Godot process stdout/stderr (compiler errors). Supports `errors_only` to drop non-stderr lines. |
 | `godot_eval` | Evaluate C# code via Roslyn (currently disabled) |
 | `godot_set_property` | Set a node property by path |
 | `godot_find_nodes` | Find nodes by Godot type |
@@ -237,6 +240,56 @@ Examples:
 { "node_path": "/root/Main/Settings/MusicSlider", "signal": "value_changed", "args": [0.75] }
 { "node_path": "/root/Main/UI/MuteToggle", "signal": "toggled", "args": [true] }
 ```
+
+#### `godot_scene_tree`
+
+The full tree for a real scene is commonly multiple MB. Three ways to narrow it, layered from cheapest to most expressive:
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `from_path` | string | root | Start the walk at this node path. Combined with `max_depth=1` in a jq pipe, this is the fastest way to list a node's immediate children. |
+| `include_properties` | boolean | `true` | When `false`, skip all exported properties on every node. Shrinks the payload dramatically — use this whenever you just need the node graph. |
+| `jq` | string | none | A jq expression applied to the serialized tree **on the bridge side** (via the bundled `jq` binary from `Devlooped.JQ`). Returns the raw jq stdout as a string. |
+
+Recommended workflow: scope with `from_path` + `include_properties: false`, then query with `jq`.
+
+Examples:
+
+```json
+// Does a node named "Player" exist anywhere?
+{ "include_properties": false, "jq": "[.. | objects | select(.name==\"Player\") | .path]" }
+
+// List every Button in the UI subtree, name + path.
+{ "from_path": "/root/Main/UILayer", "include_properties": false,
+  "jq": "[.. | objects | select(.type==\"Button\") | {name, path}]" }
+
+// Immediate children of /root/Main (name + type only).
+{ "from_path": "/root/Main", "include_properties": false,
+  "jq": ".children | map({name, type})" }
+
+// Parent + siblings of a node: walk from the parent, one level deep.
+{ "from_path": "/root/Main/UILayer/RightPanel", "include_properties": false,
+  "jq": "{self: .name, children: (.children | map(.name))}" }
+```
+
+When `jq` is set the response is the raw jq output (string). When it's not set the response is a JSON-stringified tree object.
+
+#### `godot_screenshot`
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `wait_frames` | int | `1` | Frames to wait before capture. Bump to `3`–`10` to let fade-in tweens, post-processing, or newly instantiated scenes settle. |
+
+Only works in windowed mode (`headless: false`).
+
+#### `godot_stdout`
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `lines` | int | `50` | Number of lines to return (max 200). |
+| `errors_only` | boolean | `false` | Keep only lines tagged `[stderr]` (stack traces, compile errors). Normal stdout (including `McpLog` info/warn output) is dropped. |
+
+Use `errors_only: true` when a stack trace is drowning out other output; use the default when you need to see the `[INFO]` logs alongside any errors.
 
 ### Extension Tools (require game-specific bridge commands)
 

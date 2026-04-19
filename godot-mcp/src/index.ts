@@ -274,11 +274,13 @@ server.tool(
 
 server.tool(
   "godot_screenshot",
-  "Capture a screenshot of the current Godot viewport. Returns the image as base64 PNG.",
-  {},
-  async () => {
+  "Capture a screenshot of the current Godot viewport. Returns the image as base64 PNG. Use wait_frames to let tweens/fades settle before capture.",
+  {
+    wait_frames: z.number().int().optional().default(1).describe("Number of frames to wait before capture (default 1). Bump to 3-10 to let fade-in tweens or post-processing settle."),
+  },
+  async ({ wait_frames }) => {
     try {
-      const resp = await sendBridgeCommand({ cmd: "screenshot" });
+      const resp = await sendBridgeCommand({ cmd: "screenshot", waitFrames: wait_frames });
       if (!resp.ok) {
         return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
       }
@@ -300,13 +302,23 @@ server.tool(
 
 server.tool(
   "godot_scene_tree",
-  "Get the full scene tree with node types, paths, and exported properties. Use this after every reload to verify node structure.",
-  {},
-  async () => {
+  "Get the scene tree with node types, paths, and optionally exported properties. The full tree can be multiple MB — always use from_path, include_properties=false, or a jq expression to narrow the result. Prefer jq for structured queries since it runs on the bridge (no 3.5MB round-trip to filter client-side).",
+  {
+    from_path: z.string().optional().describe("Absolute node path to start the walk from, e.g. '/root/Main'. Defaults to the SceneTree root."),
+    include_properties: z.boolean().optional().default(true).describe("Include per-node exported properties. Set false for a compact skeleton (names/types/paths/children only) — dramatically smaller."),
+    jq: z.string().optional().describe("Optional jq expression applied to the serialized tree on the bridge side. Examples: '[.. | objects | select(.name==\"Player\") | .path]' to find a node, '.children | map({name, type})' to list top-level children, '.. | objects | select(.type==\"Button\") | .path' to find all buttons. Returns the raw jq stdout as a string."),
+  },
+  async ({ from_path, include_properties, jq }) => {
     try {
-      const resp = await sendBridgeCommand({ cmd: "tree" });
+      const cmd: Record<string, unknown> = { cmd: "tree", includeProperties: include_properties };
+      if (from_path) cmd.fromPath = from_path;
+      if (jq) cmd.jq = jq;
+      const resp = await sendBridgeCommand(cmd);
       if (!resp.ok) {
         return { content: [{ type: "text", text: `Error: ${resp.error}` }], isError: true };
+      }
+      if (typeof resp.jqResult === "string") {
+        return { content: [{ type: "text", text: resp.jqResult || "(empty jq result)" }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(resp.tree, null, 2) }] };
     } catch (e) {
@@ -341,13 +353,17 @@ server.tool(
 
 server.tool(
   "godot_stdout",
-  "Return the last N lines from the Godot process stdout/stderr. This is where C# compiler errors appear. Always check this after godot_reload.",
+  "Return the last N lines from the Godot process stdout/stderr. This is where C# compiler errors appear. Always check this after godot_reload. Use errors_only to drop normal stdout and keep just [stderr]-tagged lines (compile errors, stack traces).",
   {
     lines: z.number().optional().default(50).describe("Number of lines to return (default 50, max 200)"),
+    errors_only: z.boolean().optional().default(false).describe("Keep only lines tagged [stderr] (stack traces, compile errors). Normal stdout (including McpLog info/warn) is dropped."),
   },
-  async ({ lines }) => {
+  async ({ lines, errors_only }) => {
     const n = Math.min(Math.max(1, lines), STDOUT_MAX);
-    const output = stdoutBuffer.slice(-n).join("\n");
+    const source = errors_only
+      ? stdoutBuffer.filter((l) => l.startsWith("[stderr]"))
+      : stdoutBuffer;
+    const output = source.slice(-n).join("\n");
     return { content: [{ type: "text", text: output || "(no output)" }] };
   }
 );

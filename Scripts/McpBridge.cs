@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Devlooped;
 using Godot;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
@@ -162,8 +163,8 @@ public partial class McpBridge : Node
             response = cmd switch
             {
                 "ping"       => HandlePing(),
-                "screenshot" => await HandleScreenshot(),
-                "tree"       => HandleTree(),
+                "screenshot" => await HandleScreenshot(root),
+                "tree"       => await HandleTree(root),
                 "logs"       => HandleLogs(),
                 "eval"       => await HandleEval(root),
                 "set"        => HandleSet(root),
@@ -202,12 +203,14 @@ public partial class McpBridge : Node
         return JsonOk(new { pong = true });
     }
 
-    private async Task<string> HandleScreenshot()
+    private async Task<string> HandleScreenshot(JsonElement root)
     {
         try
         {
-            // Wait one frame for rendering to complete
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            int waitFrames = root.TryGetProperty("waitFrames", out var wf) ? Math.Max(1, wf.GetInt32()) : 1;
+
+            for (int i = 0; i < waitFrames; i++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
             var viewport = GetViewport();
             if (viewport == null)
@@ -234,10 +237,31 @@ public partial class McpBridge : Node
         }
     }
 
-    private string HandleTree()
+    private async Task<string> HandleTree(JsonElement root)
     {
-        var tree = WalkNode(GetTree().Root);
-        return JsonOk(new { tree });
+        string fromPath = root.TryGetProperty("fromPath", out var fp) ? fp.GetString() : null;
+        bool includeProperties = !root.TryGetProperty("includeProperties", out var ip) || ip.GetBoolean();
+        string jqExpr = root.TryGetProperty("jq", out var jq) ? jq.GetString() : null;
+
+        Node startNode = string.IsNullOrEmpty(fromPath) ? GetTree().Root : GetTree().Root.GetNodeOrNull(fromPath);
+        if (startNode == null)
+            return JsonErr($"Node not found: {fromPath}");
+
+        var tree = WalkNode(startNode, includeProperties);
+
+        if (string.IsNullOrEmpty(jqExpr))
+            return JsonOk(new { tree });
+
+        try
+        {
+            string treeJson = JsonSerializer.Serialize(tree, JsonCtx.Options);
+            string jqOut = await JQ.ExecuteAsync(treeJson, jqExpr);
+            return JsonOk(new { jqResult = jqOut });
+        }
+        catch (Exception ex)
+        {
+            return JsonErr($"jq error: {ex.Message}");
+        }
     }
 
     private string HandleLogs()
@@ -549,7 +573,7 @@ public partial class McpBridge : Node
 
     // ── Helpers ───────────────────────────────────────────────────
 
-    private Dictionary<string, object> WalkNode(Node node)
+    private Dictionary<string, object> WalkNode(Node node, bool includeProperties)
     {
         var result = new Dictionary<string, object>
         {
@@ -558,32 +582,32 @@ public partial class McpBridge : Node
             ["path"] = node.GetPath().ToString()
         };
 
-        // Exported properties
-        var exported = new Dictionary<string, object>();
-        foreach (var propDict in node.GetPropertyList())
+        if (includeProperties)
         {
-            var usage = (PropertyUsageFlags)(int)propDict["usage"];
-            if (!usage.HasFlag(PropertyUsageFlags.Storage))
-                continue;
-
-            string name = (string)propDict["name"];
-            // Skip internal/noisy properties
-            if (name.StartsWith("metadata/") || name == "script")
-                continue;
-
-            try
+            var exported = new Dictionary<string, object>();
+            foreach (var propDict in node.GetPropertyList())
             {
-                var val = node.Get(name);
-                exported[name] = VariantToObject(val);
-            }
-            catch { /* skip unreadable properties */ }
-        }
-        result["properties"] = exported;
+                var usage = (PropertyUsageFlags)(int)propDict["usage"];
+                if (!usage.HasFlag(PropertyUsageFlags.Storage))
+                    continue;
 
-        // Children
+                string name = (string)propDict["name"];
+                if (name.StartsWith("metadata/") || name == "script")
+                    continue;
+
+                try
+                {
+                    var val = node.Get(name);
+                    exported[name] = VariantToObject(val);
+                }
+                catch { /* skip unreadable properties */ }
+            }
+            result["properties"] = exported;
+        }
+
         var children = new List<Dictionary<string, object>>();
         foreach (var child in node.GetChildren())
-            children.Add(WalkNode(child));
+            children.Add(WalkNode(child, includeProperties));
         result["children"] = children;
 
         return result;
