@@ -67,6 +67,9 @@ public partial class McpBridge : Node
 
         _roslynReady = false; // Eval disabled — Roslyn crashes on Godot 4.6 Windows
         McpLog.Info("Roslyn eval disabled (Godot 4.6 Windows incompatibility)");
+
+        // Let the project-specific partial file wire in its command handler.
+        InitializeProject();
     }
 
     public override void _Process(double delta)
@@ -150,6 +153,23 @@ public partial class McpBridge : Node
         }
     }
 
+    /// <summary>
+    /// Project-specific command dispatch hook. Projects extend this partial class
+    /// in a sibling file (e.g. McpBridge.Project.cs) and set <see cref="_projectCommandHandler"/>
+    /// from <see cref="InitializeProject"/> to register project-specific commands
+    /// without modifying this template. The handler should return a JSON response
+    /// string to handle the command, or null/empty to fall through to the default
+    /// dispatch.
+    /// </summary>
+    private System.Func<string, JsonElement, Task<string>> _projectCommandHandler;
+
+    /// <summary>
+    /// Partial hook called at the end of <see cref="_Ready"/>. A sibling partial
+    /// class may implement this to wire <see cref="_projectCommandHandler"/>.
+    /// Omitting the sibling is fine — the compiler elides the call.
+    /// </summary>
+    partial void InitializeProject();
+
     private async Task HandleCommand(string json)
     {
         string response;
@@ -160,22 +180,33 @@ public partial class McpBridge : Node
             string cmd = root.GetProperty("cmd").GetString();
             McpLog.Info($"CMD: {cmd}");
 
-            response = cmd switch
+            // Give the project a chance to handle the command first.
+            string projectResponse = _projectCommandHandler != null
+                ? await _projectCommandHandler(cmd, root)
+                : null;
+            if (!string.IsNullOrEmpty(projectResponse))
             {
-                "ping"       => HandlePing(),
-                "screenshot" => await HandleScreenshot(root),
-                "tree"       => await HandleTree(root),
-                "logs"       => HandleLogs(),
-                "eval"       => await HandleEval(root),
-                "set"        => HandleSet(root),
-                "nodes"      => HandleNodes(root),
-                "click"      => await HandleClick(root),
-                "key"        => await HandleKey(root),
-                "press_button" => HandlePressButton(root),
-                "click_node" => HandleClickNode(root),
-                "fire_signal" => HandleFireSignal(root),
-                _            => JsonErr($"Unknown command: {cmd}")
-            };
+                response = projectResponse;
+            }
+            else
+            {
+                response = cmd switch
+                {
+                    "ping"       => HandlePing(),
+                    "screenshot" => await HandleScreenshot(root),
+                    "tree"       => await HandleTree(root),
+                    "logs"       => HandleLogs(),
+                    "eval"       => await HandleEval(root),
+                    "set"        => HandleSet(root),
+                    "nodes"      => HandleNodes(root),
+                    "click"      => await HandleClick(root),
+                    "key"        => await HandleKey(root),
+                    "press_button" => HandlePressButton(root),
+                    "click_node" => HandleClickNode(root),
+                    "fire_signal" => HandleFireSignal(root),
+                    _            => JsonErr($"Unknown command: {cmd}")
+                };
+            }
         }
         catch (Exception ex)
         {
