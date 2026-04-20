@@ -162,7 +162,12 @@ function stopProcess(): Promise<void> {
   });
 }
 
-async function startProcess(scenePath: string, projectPath: string, headlessParam?: boolean): Promise<string> {
+async function startProcess(
+  scenePath: string,
+  projectPath: string,
+  headlessParam?: boolean,
+  extraEnv?: Record<string, string>,
+): Promise<string> {
   if (godotProcess) {
     throw new Error("Godot process is already running. Call godot_stop first.");
   }
@@ -183,7 +188,7 @@ async function startProcess(scenePath: string, projectPath: string, headlessPara
 
   godotProcess = spawn(godotBin, args, {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
+    env: { ...process.env, ...(extraEnv ?? {}) },
   });
 
   godotProcess.stdout?.on("data", (data: Buffer) => {
@@ -224,15 +229,16 @@ const server = new McpServer({
 
 server.tool(
   "godot_start",
-  "Start Godot with the given scene. Spawns the process and waits for the McpBridge TCP connection. Set headless=false when you need screenshots.",
+  "Start Godot with the given scene. Spawns the process and waits for the McpBridge TCP connection. Set headless=false when you need screenshots. Pass env to inject extra environment variables into the Godot process (e.g. DEBUG_EVENTBUS=1).",
   {
     scene_path: z.string().describe("Path to the scene file relative to the project root, e.g. 'res://Scenes/Main.tscn'"),
     project_path: z.string().describe("Absolute path to the Godot project directory containing project.godot"),
     headless: z.boolean().optional().describe("Run headless (no window, no screenshots) or windowed (screenshots work). Defaults to GODOT_HEADLESS env or true."),
+    env: z.record(z.string(), z.string()).optional().describe("Extra environment variables merged onto process.env for the Godot child, e.g. {\"DEBUG_EVENTBUS\":\"1\",\"DEBUG_EVENTBUS_FILTER\":\"-SignatureChanged\"}"),
   },
-  async ({ scene_path, project_path, headless }) => {
+  async ({ scene_path, project_path, headless, env }) => {
     try {
-      const result = await startProcess(scene_path, project_path, headless);
+      const result = await startProcess(scene_path, project_path, headless, env);
       return { content: [{ type: "text", text: result }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
@@ -252,17 +258,18 @@ server.tool(
 
 server.tool(
   "godot_reload",
-  "Stop and restart Godot with the given scene. This triggers C# recompilation. Always call godot_stdout after this to check for compile errors. Set headless=false when you need screenshots.",
+  "Stop and restart Godot with the given scene. This triggers C# recompilation. Always call godot_stdout after this to check for compile errors. Set headless=false when you need screenshots. Pass env to inject extra environment variables into the Godot process (e.g. DEBUG_EVENTBUS=1); env is applied fresh each reload, so clear it by omitting or passing {}.",
   {
     scene_path: z.string().describe("Path to the scene file, e.g. 'res://Scenes/Main.tscn'"),
     project_path: z.string().describe("Absolute path to the Godot project directory"),
     headless: z.boolean().optional().describe("Run headless (no window) or windowed (screenshots work). Defaults to GODOT_HEADLESS env or true."),
+    env: z.record(z.string(), z.string()).optional().describe("Extra environment variables merged onto process.env for the Godot child, e.g. {\"DEBUG_EVENTBUS\":\"1\",\"DEBUG_EVENTBUS_FILTER\":\"-SignatureChanged\"}"),
   },
-  async ({ scene_path, project_path, headless }) => {
+  async ({ scene_path, project_path, headless, env }) => {
     await stopProcess();
     await sleep(500); // Brief pause for port release
     try {
-      const result = await startProcess(scene_path, project_path, headless);
+      const result = await startProcess(scene_path, project_path, headless, env);
       return { content: [{ type: "text", text: result }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
