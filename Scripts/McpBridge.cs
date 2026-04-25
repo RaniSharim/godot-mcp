@@ -22,11 +22,11 @@ public partial class McpBridge : Node
 {
     private const int Port = 9876;
 
-    private TcpListener _listener;
-    private TcpClient _client;
-    private NetworkStream _stream;
-    private StreamWriter _writer;
-    private ScriptOptions _scriptOptions;
+    private TcpListener _listener = null!;
+    private TcpClient? _client;
+    private NetworkStream? _stream;
+    private StreamWriter? _writer;
+    private ScriptOptions _scriptOptions = null!;
     private bool _roslynReady;
     private readonly StringBuilder _lineBuffer = new();
     private bool _processingCommand;
@@ -161,7 +161,9 @@ public partial class McpBridge : Node
     /// string to handle the command, or null/empty to fall through to the default
     /// dispatch.
     /// </summary>
-    private System.Func<string, JsonElement, Task<string>> _projectCommandHandler;
+#pragma warning disable CS0649 // Assigned in sibling partial (McpBridge.Project.cs) when present
+    private System.Func<string, JsonElement, Task<string>>? _projectCommandHandler;
+#pragma warning restore CS0649
 
     /// <summary>
     /// Partial hook called at the end of <see cref="_Ready"/>. A sibling partial
@@ -177,11 +179,11 @@ public partial class McpBridge : Node
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            string cmd = root.GetProperty("cmd").GetString();
+            string cmd = root.GetProperty("cmd").GetString() ?? "";
             McpLog.Info($"CMD: {cmd}");
 
             // Give the project a chance to handle the command first.
-            string projectResponse = _projectCommandHandler != null
+            string? projectResponse = _projectCommandHandler != null
                 ? await _projectCommandHandler(cmd, root)
                 : null;
             if (!string.IsNullOrEmpty(projectResponse))
@@ -217,8 +219,8 @@ public partial class McpBridge : Node
         try
         {
             McpLog.Info($"Sending response ({response.Length} chars)");
-            _writer.WriteLine(response);
-            _writer.Flush();
+            _writer?.WriteLine(response);
+            _writer?.Flush();
         }
         catch (Exception ex)
         {
@@ -270,9 +272,9 @@ public partial class McpBridge : Node
 
     private async Task<string> HandleTree(JsonElement root)
     {
-        string fromPath = root.TryGetProperty("fromPath", out var fp) ? fp.GetString() : null;
+        string? fromPath = root.TryGetProperty("fromPath", out var fp) ? fp.GetString() : null;
         bool includeProperties = !root.TryGetProperty("includeProperties", out var ip) || ip.GetBoolean();
-        string jqExpr = root.TryGetProperty("jq", out var jq) ? jq.GetString() : null;
+        string? jqExpr = root.TryGetProperty("jq", out var jq) ? jq.GetString() : null;
 
         Node startNode = string.IsNullOrEmpty(fromPath) ? GetTree().Root : GetTree().Root.GetNodeOrNull(fromPath);
         if (startNode == null)
@@ -309,9 +311,14 @@ public partial class McpBridge : Node
 
     private string HandleSet(JsonElement root)
     {
-        string nodePath = root.GetProperty("node").GetString();
-        string prop = root.GetProperty("prop").GetString();
+        string? nodePath = root.GetProperty("node").GetString();
+        string? prop = root.GetProperty("prop").GetString();
         var valueElement = root.GetProperty("value");
+
+        if (string.IsNullOrEmpty(nodePath))
+            return JsonErr("Missing 'node' field");
+        if (string.IsNullOrEmpty(prop))
+            return JsonErr("Missing 'prop' field");
 
         var node = GetTree().Root.GetNodeOrNull(nodePath);
         if (node == null)
@@ -324,7 +331,9 @@ public partial class McpBridge : Node
 
     private string HandleNodes(JsonElement root)
     {
-        string typeName = root.GetProperty("type").GetString();
+        string? typeName = root.GetProperty("type").GetString();
+        if (string.IsNullOrEmpty(typeName))
+            return JsonErr("Missing 'type' field");
         var paths = new List<string>();
         FindNodesByType(GetTree().Root, typeName, paths);
         return JsonOk(new { paths });
@@ -334,8 +343,10 @@ public partial class McpBridge : Node
     {
         try
         {
-            string keyName = root.GetProperty("key").GetString();
-            string mode = root.TryGetProperty("mode", out var m) ? m.GetString() : "tap";
+            string? keyName = root.GetProperty("key").GetString();
+            string mode = root.TryGetProperty("mode", out var m) ? (m.GetString() ?? "tap") : "tap";
+            if (string.IsNullOrEmpty(keyName))
+                return JsonErr("Missing 'key' field");
             bool shift = root.TryGetProperty("shift", out var s) && s.GetBoolean();
             bool ctrl = root.TryGetProperty("ctrl", out var c) && c.GetBoolean();
             bool alt = root.TryGetProperty("alt", out var a) && a.GetBoolean();
@@ -397,7 +408,7 @@ public partial class McpBridge : Node
     private string HandleClickNode(JsonElement root)
     {
         string nodePath = root.GetProperty("node_path").GetString() ?? "";
-        string buttonStr = root.TryGetProperty("button", out var b) ? b.GetString() : "left";
+        string buttonStr = root.TryGetProperty("button", out var b) ? (b.GetString() ?? "left") : "left";
         bool doubleClick = root.TryGetProperty("double", out var d) && d.GetBoolean();
         bool ctrl = root.TryGetProperty("ctrl", out var cc) && cc.GetBoolean();
         bool shift = root.TryGetProperty("shift", out var ss) && ss.GetBoolean();
@@ -517,7 +528,7 @@ public partial class McpBridge : Node
         {
             float x = (float)root.GetProperty("x").GetDouble();
             float y = (float)root.GetProperty("y").GetDouble();
-            string buttonStr = root.TryGetProperty("button", out var b) ? b.GetString() : "left";
+            string buttonStr = root.TryGetProperty("button", out var b) ? (b.GetString() ?? "left") : "left";
             bool doubleClick = root.TryGetProperty("double", out var d) && d.GetBoolean();
             bool ctrl = root.TryGetProperty("ctrl", out var cc) && cc.GetBoolean();
             bool shift = root.TryGetProperty("shift", out var ss) && ss.GetBoolean();
@@ -604,9 +615,9 @@ public partial class McpBridge : Node
 
     // ── Helpers ───────────────────────────────────────────────────
 
-    private Dictionary<string, object> WalkNode(Node node, bool includeProperties)
+    private Dictionary<string, object?> WalkNode(Node node, bool includeProperties)
     {
-        var result = new Dictionary<string, object>
+        var result = new Dictionary<string, object?>
         {
             ["name"] = node.Name.ToString(),
             ["type"] = node.GetClass(),
@@ -615,7 +626,7 @@ public partial class McpBridge : Node
 
         if (includeProperties)
         {
-            var exported = new Dictionary<string, object>();
+            var exported = new Dictionary<string, object?>();
             foreach (var propDict in node.GetPropertyList())
             {
                 var usage = (PropertyUsageFlags)(int)propDict["usage"];
@@ -636,7 +647,7 @@ public partial class McpBridge : Node
             result["properties"] = exported;
         }
 
-        var children = new List<Dictionary<string, object>>();
+        var children = new List<Dictionary<string, object?>>();
         foreach (var child in node.GetChildren())
             children.Add(WalkNode(child, includeProperties));
         result["children"] = children;
@@ -653,7 +664,7 @@ public partial class McpBridge : Node
             FindNodesByType(child, typeName, paths);
     }
 
-    private static object VariantToObject(Variant v)
+    private static object? VariantToObject(Variant v)
     {
         return v.VariantType switch
         {
@@ -684,11 +695,20 @@ public partial class McpBridge : Node
 
     private static string JsonOk(object data)
     {
-        var wrapper = new Dictionary<string, object>(
-            data as IDictionary<string, object> ??
-            data.GetType().GetProperties()
-                .ToDictionary(p => ToCamelCase(p.Name), p => p.GetValue(data))
-        );
+        var wrapper = new Dictionary<string, object?>();
+        if (data is IDictionary<string, object?> dictNullable)
+        {
+            foreach (var kv in dictNullable) wrapper[kv.Key] = kv.Value;
+        }
+        else if (data is IDictionary<string, object> dict)
+        {
+            foreach (var kv in dict) wrapper[kv.Key] = kv.Value;
+        }
+        else
+        {
+            foreach (var p in data.GetType().GetProperties())
+                wrapper[ToCamelCase(p.Name)] = p.GetValue(data);
+        }
         wrapper["ok"] = true;
         return JsonSerializer.Serialize(wrapper, JsonCtx.Options);
     }
@@ -721,8 +741,8 @@ public partial class McpBridge : Node
 /// <summary>Globals exposed to Roslyn eval scripts.</summary>
 public class EvalGlobals
 {
-    public Node Root { get; set; }
-    public SceneTree Tree { get; set; }
+    public Node? Root { get; set; }
+    public SceneTree? Tree { get; set; }
 }
 
 /// <summary>JSON serializer context for consistent output.</summary>
