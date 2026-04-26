@@ -6,9 +6,9 @@ This project has a running MCP server (`godot-mcp`) that gives you direct contro
 
 Follow this loop for **every** change:
 
-1. **Batch all related file edits first** — never reload between individual file changes. C# recompilation takes 10–30 seconds.
-2. **`godot_reload`** — triggers C# recompilation and restarts the scene.
-3. **`godot_stdout`** immediately — if compilation failed, the error is here. The bridge will not be up. Fix the error and reload before calling any other tool.
+1. **Batch all related file edits first** — never reload between individual file changes. The `dotnet build` step takes 5–30 seconds.
+2. **`godot_reload`** — runs `dotnet build` (default), then restarts the scene. Pass `rebuild: false` if you only changed `.tscn`/`.tres`/asset files.
+3. **`godot_stdout`** immediately — if the build failed, the error is here (lines tagged `[build]` / `[build][stderr]`). The bridge will not be up. Fix the error and reload before calling any other tool.
 4. **`godot_screenshot`** — verify the scene renders correctly. **Only works in windowed mode** (pass `headless: false` to `godot_start`/`godot_reload`).
 5. **`godot_scene_tree`** — verify node structure matches expectations.
 6. **`godot_logs`** — check for runtime errors or warnings from `_Ready()` and early frames.
@@ -29,11 +29,13 @@ The default can also be set via the `GODOT_HEADLESS` environment variable in `.m
 
 ## Compilation Failures
 
-If `godot_reload` completes but `godot_screenshot` hangs or the bridge does not respond, **always check `godot_stdout` first**. C# compile errors only appear there. The bridge never starts if the build fails, so no other tools will work until the error is fixed and the scene is reloaded.
+`godot_reload` runs `dotnet build` before launching Godot. If the build fails, Godot is **not** spawned — the response will say so directly, and the build output (`[build]` / `[build][stderr]` lines) is in `godot_stdout`. Fix the error and reload.
+
+If `godot_reload` says it started but `godot_screenshot` hangs or the bridge doesn't respond, check `godot_stdout` for runtime errors during `_Ready()` — those don't fail the build but can prevent the bridge autoload from coming up.
 
 ## Batching Edits
 
-C# recompilation is slow. Always batch all related file changes before calling `godot_reload`. Never reload after each individual file edit.
+The `dotnet build` step is the slow part of each iteration. Always batch all related file changes before calling `godot_reload`. Never reload after each individual file edit.
 
 ## Scene Tree as Ground Truth
 

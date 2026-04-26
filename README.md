@@ -112,9 +112,9 @@ Copy `CLAUDE.md` to the root of your game project so Claude Code picks it up aut
 
 | Tool | Description |
 |---|---|
-| `godot_start` | Start Godot with a scene |
+| `godot_start` | Start Godot with a scene. Runs `dotnet build` first by default (set `rebuild: false` to skip). |
 | `godot_stop` | Stop the Godot process |
-| `godot_reload` | Restart Godot (triggers C# recompilation) |
+| `godot_reload` | Restart Godot. Runs `dotnet build` first by default — Godot's standalone runtime does NOT recompile on its own, so this is required for C# edits to take effect. Set `rebuild: false` when only assets changed. |
 | `godot_screenshot` | Capture viewport as PNG (windowed mode only). Supports `wait_frames` to let tweens settle. |
 | `godot_scene_tree` | Scene tree with node types, paths, and optional properties. Supports `from_path`, `include_properties`, and server-side `jq` filtering. |
 | `godot_logs` | Drain McpLog buffer |

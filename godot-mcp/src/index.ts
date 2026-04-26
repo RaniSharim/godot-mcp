@@ -162,11 +162,59 @@ function stopProcess(): Promise<void> {
   });
 }
 
+function findBuildTarget(projectPath: string): string | null {
+  // Prefer .sln (handles multi-project setups), fall back to .csproj.
+  // `dotnet build <dir>` errors when a directory contains both, so we
+  // disambiguate by passing an explicit file.
+  try {
+    const entries = fs.readdirSync(projectPath);
+    const sln = entries.find((f) => f.toLowerCase().endsWith(".sln"));
+    if (sln) return path.join(projectPath, sln);
+    const csproj = entries.find((f) => f.toLowerCase().endsWith(".csproj"));
+    if (csproj) return path.join(projectPath, csproj);
+  } catch { /* fall through */ }
+  return null;
+}
+
+function runDotnetBuild(projectPath: string): Promise<{ exitCode: number; output: string }> {
+  return new Promise((resolve) => {
+    const target = findBuildTarget(projectPath);
+    if (!target) {
+      const msg = `[build][stderr] no .sln or .csproj found in ${projectPath}`;
+      pushStdout(msg);
+      resolve({ exitCode: -1, output: msg });
+      return;
+    }
+    const proc = spawn("dotnet", ["build", "--nologo", "-v", "minimal", target], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const lines: string[] = [];
+    const onLine = (data: Buffer, prefix: string) => {
+      for (const line of data.toString().split("\n")) {
+        if (!line.trim()) continue;
+        const tagged = prefix ? `${prefix} ${line}` : line;
+        lines.push(tagged);
+        pushStdout(tagged);
+      }
+    };
+    proc.stdout?.on("data", (d: Buffer) => onLine(d, "[build]"));
+    proc.stderr?.on("data", (d: Buffer) => onLine(d, "[build][stderr]"));
+    proc.on("error", (err) => {
+      const msg = `[build][stderr] failed to spawn dotnet: ${err.message}`;
+      lines.push(msg);
+      pushStdout(msg);
+      resolve({ exitCode: -1, output: lines.join("\n") });
+    });
+    proc.on("exit", (code) => resolve({ exitCode: code ?? -1, output: lines.join("\n") }));
+  });
+}
+
 async function startProcess(
   scenePath: string,
   projectPath: string,
   headlessParam?: boolean,
   extraEnv?: Record<string, string>,
+  rebuild: boolean = true,
 ): Promise<string> {
   if (godotProcess) {
     throw new Error("Godot process is already running. Call godot_stop first.");
@@ -174,6 +222,16 @@ async function startProcess(
 
   // Clear stdout buffer
   stdoutBuffer.length = 0;
+
+  // Compile C# before launching. Godot's standalone runtime loads the prebuilt
+  // assembly from .godot/mono/temp/bin/<Config>/ — it does NOT invoke msbuild
+  // itself. Without this step, source edits silently run against the stale dll.
+  if (rebuild) {
+    const { exitCode } = await runDotnetBuild(projectPath);
+    if (exitCode !== 0) {
+      return `dotnet build failed (exit ${exitCode}). See godot_stdout for details.`;
+    }
+  }
 
   // Find godot executable
   const godotBin = process.env.GODOT_BIN || "godot";
@@ -229,16 +287,17 @@ const server = new McpServer({
 
 server.tool(
   "godot_start",
-  "Start Godot with the given scene. Spawns the process and waits for the McpBridge TCP connection. Set headless=false when you need screenshots. Pass env to inject extra environment variables into the Godot process (e.g. DEBUG_EVENTBUS=1).",
+  "Start Godot with the given scene. Runs `dotnet build` first (default), then spawns the process and waits for the McpBridge TCP connection. Set headless=false when you need screenshots. Pass env to inject extra environment variables into the Godot process (e.g. DEBUG_EVENTBUS=1). Set rebuild=false to skip the build (e.g. when only assets changed).",
   {
     scene_path: z.string().describe("Path to the scene file relative to the project root, e.g. 'res://Scenes/Main.tscn'"),
     project_path: z.string().describe("Absolute path to the Godot project directory containing project.godot"),
     headless: z.boolean().optional().describe("Run headless (no window, no screenshots) or windowed (screenshots work). Defaults to GODOT_HEADLESS env or true."),
     env: z.record(z.string(), z.string()).optional().describe("Extra environment variables merged onto process.env for the Godot child, e.g. {\"DEBUG_EVENTBUS\":\"1\",\"DEBUG_EVENTBUS_FILTER\":\"-SignatureChanged\"}"),
+    rebuild: z.boolean().optional().default(true).describe("Run `dotnet build` before launching Godot. Default true. Set false when only .tscn/.tres/asset files changed to save 5–30s."),
   },
-  async ({ scene_path, project_path, headless, env }) => {
+  async ({ scene_path, project_path, headless, env, rebuild }) => {
     try {
-      const result = await startProcess(scene_path, project_path, headless, env);
+      const result = await startProcess(scene_path, project_path, headless, env, rebuild);
       return { content: [{ type: "text", text: result }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
@@ -258,18 +317,19 @@ server.tool(
 
 server.tool(
   "godot_reload",
-  "Stop and restart Godot with the given scene. This triggers C# recompilation. Always call godot_stdout after this to check for compile errors. Set headless=false when you need screenshots. Pass env to inject extra environment variables into the Godot process (e.g. DEBUG_EVENTBUS=1); env is applied fresh each reload, so clear it by omitting or passing {}.",
+  "Stop and restart Godot with the given scene. Runs `dotnet build` first (default) so C# edits take effect — Godot's standalone runtime does NOT recompile on its own. Always call godot_stdout after this to check for compile errors. Set headless=false when you need screenshots. Pass env to inject extra environment variables into the Godot process (e.g. DEBUG_EVENTBUS=1); env is applied fresh each reload, so clear it by omitting or passing {}. Set rebuild=false to skip the build when only assets changed.",
   {
     scene_path: z.string().describe("Path to the scene file, e.g. 'res://Scenes/Main.tscn'"),
     project_path: z.string().describe("Absolute path to the Godot project directory"),
     headless: z.boolean().optional().describe("Run headless (no window) or windowed (screenshots work). Defaults to GODOT_HEADLESS env or true."),
     env: z.record(z.string(), z.string()).optional().describe("Extra environment variables merged onto process.env for the Godot child, e.g. {\"DEBUG_EVENTBUS\":\"1\",\"DEBUG_EVENTBUS_FILTER\":\"-SignatureChanged\"}"),
+    rebuild: z.boolean().optional().default(true).describe("Run `dotnet build` before launching Godot. Default true. Set false when only .tscn/.tres/asset files changed to save 5–30s."),
   },
-  async ({ scene_path, project_path, headless, env }) => {
+  async ({ scene_path, project_path, headless, env, rebuild }) => {
     await stopProcess();
     await sleep(500); // Brief pause for port release
     try {
-      const result = await startProcess(scene_path, project_path, headless, env);
+      const result = await startProcess(scene_path, project_path, headless, env, rebuild);
       return { content: [{ type: "text", text: result }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : e}` }], isError: true };
